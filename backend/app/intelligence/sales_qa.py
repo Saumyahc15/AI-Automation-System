@@ -46,6 +46,11 @@ def build_sales_context(db: Session, days: int = 7) -> str:
     prev_revenue = sum(o.total_amount for o in prev_orders)
     revenue_change = ((total_revenue - prev_revenue) / prev_revenue * 100) if prev_revenue > 0 else 0
 
+    # SYSTEM HEALTH: Recent automation executions
+    from ..models import Workflow, ExecutionLog
+    active_workflows = db.query(Workflow).filter(Workflow.is_active == True).all()
+    recent_logs = db.query(ExecutionLog).order_by(ExecutionLog.created_at.desc()).limit(10).all()
+
     context = f"""
 SALES DATA — Last {days} days (vs previous {days} days):
 - Total orders: {len(recent_orders)} (prev: {len(prev_orders)})
@@ -63,7 +68,13 @@ CUSTOMER HEALTH:
 - Total customers: {total_customers}
 - Active (bought in last {days} days): {active_customers}
 - Inactive (no purchase in 30+ days): {inactive_customers}
+
+SYSTEM AUTOMATIONS:
+- Active workflows: {len(active_workflows)} ({[w.trigger for w in active_workflows]})
+- Recent executions:
+{chr(10).join([f"  - [{l.created_at.strftime('%H:%M')}] {l.triggered_by}: {l.status} - {l.message}" for l in recent_logs]) or "  - No recent executions"}
 """
+
     return context.strip()
 
 
@@ -76,9 +87,14 @@ Here is the current business data:
 
 The store owner asks: "{question}"
 
+IMPORTANT: Respond in the same language the user used (Hindi, English, or Hinglish). 
+If they ask in Hindi, reply in Hindi. If they use Hinglish, reply similarly.
+
 Answer in 3-5 sentences. Be specific, use the numbers from the data.
 If the data doesn't directly answer the question, say what you can infer.
-Do not mention that you were given data — just answer naturally as an analyst."""
+Do not mention that you were given data — just answer naturally as an analyst.
+Make it conversational and helpful for an Indian shop owner.
+"""
 
     return ask_groq(
         prompt,

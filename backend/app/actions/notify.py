@@ -46,12 +46,28 @@ def notify_manager(subject: str, body: str):
 
 
 def email_supplier(supplier_email: str, product_name: str, current_stock: int):
-    subject = f"Reorder Request: {product_name}"
-    body = f"""
-    <h3>Low Stock Alert — Reorder Required</h3>
-    <p>Dear Supplier,</p>
-    <p>Our stock for <strong>{product_name}</strong> has dropped to <strong>{current_stock} units</strong>.</p>
-    <p>Please arrange a restock at your earliest convenience.</p>
-    <p>Thank you,<br>RetailAI System</p>
+    from ..groq_client.client import ask_groq
+    
+    prompt = f"""
+    Write a brief, professional reorder email for a retail store.
+    Product: {product_name}
+    Current stock: {current_stock} units
+    The stock is low and we need a restock soon.
+    Output ONLY the HTML body of the email. No subject, no greeting like 'Subject: ...'.
     """
-    send_email(supplier_email, subject, body)
+    
+    try:
+        ai_body = ask_groq(prompt, system="You are a professional retail procurement manager.")
+        # Ensure it's clean HTML
+        if "<html>" not in ai_body.lower() and "<p>" not in ai_body.lower():
+            ai_body = f"<p>{ai_body.replace(chr(10), '<br>')}</p>"
+    except Exception:
+        # Fallback if AI fails
+        ai_body = f"""
+        <p>Dear Supplier,</p>
+        <p>Our stock for <strong>{product_name}</strong> has dropped to <strong>{current_stock} units</strong>.</p>
+        <p>Please arrange a restock immediately.</p>
+        """
+    
+    subject = f"Urgent Reorder: {product_name} (Stock: {current_stock})"
+    send_email(supplier_email, subject, ai_body)

@@ -3,6 +3,9 @@ from datetime import datetime
 from ..models import Workflow, ExecutionLog
 from ..actions.notify import notify_manager, email_supplier
 from ..actions.telegram import alert_manager
+from ..actions.whatsapp import whatsapp_alert
+import os
+
 
 
 def log(db: Session, workflow_id: int, status: str, message: str, triggered_by: str):
@@ -27,6 +30,11 @@ def run_actions(workflow: Workflow, context: dict, db: Session, triggered_by: st
                     subject=f"RetailAI: {workflow.name}",
                     detail=context.get("detail", "Workflow triggered.")
                 )
+                whatsapp_alert(
+                    phone=os.getenv("MANAGER_PHONE", "919876543210"),
+                    subject=f"RetailAI: {workflow.name}",
+                    detail=context.get("detail", "Workflow triggered.")
+                )
                 notify_manager(
                     subject=f"RetailAI: {workflow.name}",
                     body=f"<p>{context.get('detail','Workflow triggered.')}</p>"
@@ -42,6 +50,11 @@ def run_actions(workflow: Workflow, context: dict, db: Session, triggered_by: st
 
             elif action == "send_alert":
                 alert_manager(
+                    subject=f"RetailAI Alert: {workflow.name}",
+                    detail=context.get("detail", "Alert triggered.")
+                )
+                whatsapp_alert(
+                    phone=os.getenv("MANAGER_PHONE", "919876543210"),
                     subject=f"RetailAI Alert: {workflow.name}",
                     detail=context.get("detail", "Alert triggered.")
                 )

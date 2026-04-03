@@ -187,3 +187,71 @@ def run_daily_report():
             print(f"[CRON] Daily report sent for {today}")
     finally:
         db.close()
+
+
+# ─── Watcher 5: Demand spike watcher ──────────────────────────────────────────
+def run_demand_watcher():
+    from ..models import OrderItem, Product
+    from sqlalchemy import func
+    db: Session = SessionLocal()
+    try:
+        workflows = get_matching_workflows(db, "sales_update")
+        if not workflows:
+            return
+
+        today = datetime.utcnow().date()
+        start = datetime.combine(today, datetime.min.time())
+
+        # Get sales per product for today
+        sales = db.query(
+            OrderItem.product_id,
+            func.sum(OrderItem.quantity).label("total_sold")
+        ).join(Order).filter(
+            Order.order_date >= start
+        ).group_by(OrderItem.product_id).all()
+
+        for wf in workflows:
+            condition = wf.condition # e.g. {"field": "daily_sales", "op": ">", "value": 50}
+            if not condition or condition.get("field") != "daily_sales":
+                continue
+            
+            for product_id, total_sold in sales:
+                if evaluate_condition(condition, total_sold):
+                    product = db.query(Product).filter(Product.id == product_id).first()
+                    context = {
+                        "product_name": product.name,
+                        "detail": f"Demand spike for <b>{product.name}</b>! Sold <b>{total_sold} units</b> today."
+                    }
+                    run_actions(wf, context, db, triggered_by="demand_watcher")
+                    print(f"[DEMAND WATCHER] Fired for {product.name} ({total_sold} sold)")
+    finally:
+        db.close()
+
+
+# ─── Instant Trigger for Production Readiness ───────────────────────────────────
+def trigger_stock_workflow(product_id: int, db: Session):
+    """Call this instantly when a product's stock is updated in the database."""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product or not product.is_active:
+        return
+
+    workflows = get_matching_workflows(db, "inventory_update")
+    for wf in workflows:
+        condition = wf.condition
+        if not condition or condition.get("field") != "stock":
+            continue
+
+        if evaluate_condition(condition, product.stock):
+            # Check cooldown logic if needed, or just fire if it's a critical BUY/SELL event
+            context = {
+                "product_name": product.name,
+                "stock": product.stock,
+                "supplier_email": product.supplier.email if product.supplier else None,
+                "detail": (
+                    f"🛑 <b>Instant Alert</b>: <b>{product.name}</b> stock changed to <b>{product.stock} units</b>. "
+                    f"Threshold: {condition['value']}."
+                )
+            }
+            run_actions(wf, context, db, triggered_by="instant_stock_trigger")
+            print(f"[INSTANT TRIGGER] Fired workflow '{wf.name}' for {product.name}")
+

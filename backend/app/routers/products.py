@@ -5,6 +5,7 @@ import random, string
 from ..database import get_db
 from ..models import Product
 from ..schemas import ProductCreate, ProductOut, ProductUpdate
+from ..engine.watchers import trigger_stock_workflow
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -49,6 +50,7 @@ def update_product(product_id: int, updates: ProductUpdate, db: Session = Depend
         setattr(product, field, value)
     db.commit()
     db.refresh(product)
+    trigger_stock_workflow(product.id, db)
     return product
 
 @router.patch("/{product_id}/adjust-stock", response_model=ProductOut)
@@ -59,6 +61,7 @@ def adjust_stock(product_id: int, quantity: int, db: Session = Depends(get_db)):
     product.stock = max(0, product.stock + quantity)
     db.commit()
     db.refresh(product)
+    trigger_stock_workflow(product.id, db)
     return product
 
 @router.delete("/{product_id}", status_code=204)

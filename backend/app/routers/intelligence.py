@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..database import get_db
 from ..intelligence.prediction import get_groq_forecast
 from ..intelligence.sales_qa import answer_sales_question
 from ..intelligence.suggestions import get_suggestions
+from ..groq_client.client import transcribe_audio
 
 router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+
 
 
 class QuestionRequest(BaseModel):
@@ -39,3 +41,14 @@ def get_automation_suggestions(db: Session = Depends(get_db)):
         return get_suggestions(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/voice")
+async def process_voice_command(file: UploadFile = File(...)):
+    """Transcribe voice note and return the text."""
+    try:
+        content = await file.read()
+        text = transcribe_audio(content, file.filename)
+        return {"text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

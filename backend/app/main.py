@@ -9,7 +9,8 @@ from .engine.watchers import (
     run_stock_watcher,
     run_order_watcher,
     run_customer_watcher,
-    run_daily_report
+    run_daily_report,
+    run_demand_watcher
 )
 
 Base.metadata.create_all(bind=engine)
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_customer_watcher, "interval", hours=6, id="customer_watcher")
     # Daily report — every day at 9 PM
     scheduler.add_job(run_daily_report, "cron", hour=21, minute=0, id="daily_report")
+    # Demand watcher — every 15 mins
+    scheduler.add_job(run_demand_watcher, "interval", minutes=15, id="demand_watcher")
     scheduler.start()
     print("[SCHEDULER] All watchers started.")
     yield

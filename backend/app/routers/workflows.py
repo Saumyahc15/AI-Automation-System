@@ -6,6 +6,7 @@ from ..database import get_db
 from ..models import Workflow
 from ..schemas import WorkflowCreate, WorkflowOut
 from ..groq_client.client import parse_nl_to_workflow
+import json
 
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
 
@@ -44,6 +45,15 @@ def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db))
     for field in required:
         if field not in parsed:
             raise HTTPException(status_code=422, detail=f"Groq response missing field: {field}")
+
+    # Duplicate check: check if a workflow with same trigger and condition already exists
+    new_trigger = parsed["trigger"]
+    new_condition_str = json.dumps(parsed.get("condition"), sort_keys=True)
+    
+    existing = db.query(Workflow).filter(Workflow.trigger == new_trigger).all()
+    for ex in existing:
+        if json.dumps(ex.condition, sort_keys=True) == new_condition_str:
+            return ex # Return already existing instead of duplicate
 
     db_workflow = Workflow(
         name=parsed.get("name", "Unnamed workflow"),
