@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import api from "../api/client";
@@ -207,6 +207,143 @@ function SuggestionsPanel({ onUseCommand }) {
   );
 }
 
+function VoiceButton({ onTranscript, disabled }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [status, setStatus] = useState("idle"); // idle, recording, transcribing
+  const mediaRecorder = useRef(null);
+  const audioChunks = useRef([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder.current = new MediaRecorder(stream);
+      audioChunks.current = [];
+      mediaRecorder.current.ondataavailable = (e) => audioChunks.current.push(e.data);
+      mediaRecorder.current.onstop = handleStop;
+      mediaRecorder.current.start();
+      setIsRecording(true);
+      setStatus("recording");
+    } catch (err) {
+      toast.error("Microphone access denied");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder.current) {
+      mediaRecorder.current.stop();
+      setIsRecording(false);
+      setStatus("transcribing");
+    }
+  };
+
+  const handleStop = async () => {
+    const audioBlob = new Blob(audioChunks.current, { type: "audio/wav" });
+    const formData = new FormData();
+    formData.append("file", audioBlob, "voice_input.wav");
+
+    try {
+      toast.loading("Transcribing...", { id: "voice" });
+      const res = await api.post("/intelligence/voice", formData);
+      onTranscript(res.data.text);
+      toast.success("Voice transcribed", { id: "voice" });
+    } catch (err) {
+      toast.error("Transcription failed", { id: "voice" });
+    } finally {
+      setStatus("idle");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={isRecording ? stopRecording : startRecording}
+      disabled={disabled || status === "transcribing"}
+      title={isRecording ? "Stop recording" : "Record voice command"}
+      style={{
+        width: 40, height: 40, borderRadius: "50%", border: "none",
+        background: isRecording ? "var(--danger)" : "var(--surface2)",
+        color: isRecording ? "#fff" : "var(--text2)",
+        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.2s", flexShrink: 0, marginBottom: 2,
+        boxShadow: isRecording ? "0 0 10px var(--danger)" : "none"
+      }}>
+      {status === "transcribing" ? (
+        <div className="spinning" style={{ fontSize: 14 }}>⏳</div>
+      ) : isRecording ? (
+        <span style={{ fontSize: 18, animation: "pulse 1.5s infinite" }}>⏹</span>
+      ) : (
+        <span style={{ fontSize: 20 }}>🎙️</span>
+      )}
+      <style>{`
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .spinning { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+    </button>
+  );
+}
+
+function ChatHistory({ history, loading }) {
+  if (history.length === 0 && !loading) return null;
+  return (
+    <div style={{ marginBottom:16, display:"flex", flexDirection:"column", gap:10 }}>
+      {history.map((msg, i) => (
+        <div key={i} style={{ display:"flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+          {msg.role === "user" && (
+            <div style={{ background:"var(--accent)", color:"#fff", padding:"10px 14px", borderRadius:"12px 12px 2px 12px", fontSize:13, maxWidth:"80%" }}>{msg.text}</div>
+          )}
+          {(msg.role === "ai" || msg.role === "answer") && (
+            <div style={{ maxWidth:"85%" }}>
+              <div style={{ background:"var(--surface)", border:"0.5px solid var(--border)", padding:"10px 14px", borderRadius:"12px 12px 12px 2px", fontSize:13, lineHeight:1.7 }}>
+                {msg.text}
+              </div>
+              {msg.workflow && <WorkflowCard wf={msg.workflow} />}
+            </div>
+          )}
+          {msg.role === "error" && (
+            <div style={{ background:"var(--danger-light)", border:"0.5px solid #f09595", color:"var(--danger)", padding:"10px 14px", borderRadius:"12px 12px 12px 2px", fontSize:13, maxWidth:"80%" }}>
+              {msg.text}
+            </div>
+          )}
+        </div>
+      ))}
+      {loading && (
+        <div style={{ display:"flex", gap:8, padding:"8px 0", alignItems:"center" }}>
+          <LoadingDots />
+          <span style={{ fontSize:12, color:"var(--text3)" }}>Groq is thinking...</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatInput({ value, onChange, onSubmit, disabled, placeholder, loading }) {
+  return (
+    <div>
+      <div style={{ background:"var(--surface)", border:"0.5px solid var(--border2)", borderRadius:"var(--radius-lg)", padding:"12px 14px", display:"flex", gap:10, alignItems:"flex-end" }}>
+        <VoiceButton onTranscript={(text) => onChange(text)} disabled={disabled} />
+        <textarea
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSubmit(); } }}
+          placeholder={placeholder}
+          rows={2}
+          style={{ flex:1, border:"none", outline:"none", resize:"none", background:"transparent", color:"var(--text)", fontSize:14, fontFamily:"DM Sans, sans-serif", lineHeight:1.6 }}
+        />
+        <button onClick={onSubmit} disabled={disabled || !value.trim()} style={{
+          padding:"8px 18px", borderRadius:"var(--radius)", border:"none",
+          background: disabled || !value.trim() ? "var(--border2)" : "var(--accent)",
+          color:"#fff", fontWeight:500, cursor: disabled || !value.trim() ? "not-allowed" : "pointer",
+          fontSize:13, flexShrink:0
+        }}>
+          {loading ? "Thinking..." : "Send"}
+        </button>
+      </div>
+      <p style={{ fontSize:11, color:"var(--text3)", marginTop:6 }}>Enter to send · Shift+Enter for new line · Click 🎙️ for voice</p>
+    </div>
+  );
+}
+
 export default function Assistant() {
   const qc = useQueryClient();
   const [tab, setTab] = useState("create");
@@ -345,66 +482,6 @@ export default function Assistant() {
       {tab === "suggest" && (
         <SuggestionsPanel onUseCommand={(cmd) => { setTab("create"); setInput(cmd); }} />
       )}
-    </div>
-  );
-}
-
-function ChatHistory({ history, loading }) {
-  if (history.length === 0 && !loading) return null;
-  return (
-    <div style={{ marginBottom:16, display:"flex", flexDirection:"column", gap:10 }}>
-      {history.map((msg, i) => (
-        <div key={i} style={{ display:"flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-          {msg.role === "user" && (
-            <div style={{ background:"var(--accent)", color:"#fff", padding:"10px 14px", borderRadius:"12px 12px 2px 12px", fontSize:13, maxWidth:"80%" }}>{msg.text}</div>
-          )}
-          {(msg.role === "ai" || msg.role === "answer") && (
-            <div style={{ maxWidth:"85%" }}>
-              <div style={{ background:"var(--surface)", border:"0.5px solid var(--border)", padding:"10px 14px", borderRadius:"12px 12px 12px 2px", fontSize:13, lineHeight:1.7 }}>
-                {msg.text}
-              </div>
-              {msg.workflow && <WorkflowCard wf={msg.workflow} />}
-            </div>
-          )}
-          {msg.role === "error" && (
-            <div style={{ background:"var(--danger-light)", border:"0.5px solid #f09595", color:"var(--danger)", padding:"10px 14px", borderRadius:"12px 12px 12px 2px", fontSize:13, maxWidth:"80%" }}>
-              {msg.text}
-            </div>
-          )}
-        </div>
-      ))}
-      {loading && (
-        <div style={{ display:"flex", gap:8, padding:"8px 0", alignItems:"center" }}>
-          <LoadingDots />
-          <span style={{ fontSize:12, color:"var(--text3)" }}>Groq is thinking...</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChatInput({ value, onChange, onSubmit, disabled, placeholder, loading }) {
-  return (
-    <div>
-      <div style={{ background:"var(--surface)", border:"0.5px solid var(--border2)", borderRadius:"var(--radius-lg)", padding:"12px 14px", display:"flex", gap:10, alignItems:"flex-end" }}>
-        <textarea
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSubmit(); } }}
-          placeholder={placeholder}
-          rows={2}
-          style={{ flex:1, border:"none", outline:"none", resize:"none", background:"transparent", color:"var(--text)", fontSize:14, fontFamily:"DM Sans, sans-serif", lineHeight:1.6 }}
-        />
-        <button onClick={onSubmit} disabled={disabled || !value.trim()} style={{
-          padding:"8px 18px", borderRadius:"var(--radius)", border:"none",
-          background: disabled || !value.trim() ? "var(--border2)" : "var(--accent)",
-          color:"#fff", fontWeight:500, cursor: disabled || !value.trim() ? "not-allowed" : "pointer",
-          fontSize:13, flexShrink:0
-        }}>
-          {loading ? "Thinking..." : "Send"}
-        </button>
-      </div>
-      <p style={{ fontSize:11, color:"var(--text3)", marginTop:6 }}>Enter to send · Shift+Enter for new line</p>
     </div>
   );
 }

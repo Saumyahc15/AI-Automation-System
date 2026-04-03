@@ -62,8 +62,8 @@ export default function WorkflowVisualizer({ workflow }) {
         {arrow()}
 
         {/* Notification end */}
-        {box("Done", "logged to DB", "var(--surface)", "var(--text2)", "var(--border2)")}
+        {box("Done", "Logged & Sent via WhatsApp", "var(--surface)", "var(--text2)", "var(--border2)")}
       </div>
     </div>
   );
-}
+}
