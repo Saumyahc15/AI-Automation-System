@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
 from ..database import get_db
-from ..models import Workflow
+from ..models import Workflow, User
 from ..schemas import WorkflowCreate, WorkflowOut
+from ..auth_handler import get_current_user
 from ..groq_client.client import parse_nl_to_workflow
 import json
 
@@ -16,13 +17,13 @@ class NLRequest(BaseModel):
 
 
 @router.get("/", response_model=List[WorkflowOut])
-def get_workflows(db: Session = Depends(get_db)):
-    return db.query(Workflow).order_by(Workflow.created_at.desc()).all()
+def get_workflows(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Workflow).filter(Workflow.user_id == current_user.id).order_by(Workflow.created_at.desc()).all()
 
 
 @router.post("/", response_model=WorkflowOut, status_code=201)
-def create_workflow(workflow: WorkflowCreate, db: Session = Depends(get_db)):
-    db_workflow = Workflow(**workflow.model_dump())
+def create_workflow(workflow: WorkflowCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_workflow = Workflow(**workflow.model_dump(), user_id=current_user.id)
     db.add(db_workflow)
     db.commit()
     db.refresh(db_workflow)
@@ -30,7 +31,7 @@ def create_workflow(workflow: WorkflowCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/parse", response_model=WorkflowOut, status_code=201)
-def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db)):
+def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Takes a natural language string, sends to Groq,
     gets back structured JSON, saves it as a workflow.
@@ -50,7 +51,7 @@ def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db))
     new_trigger = parsed["trigger"]
     new_condition_str = json.dumps(parsed.get("condition"), sort_keys=True)
     
-    existing = db.query(Workflow).filter(Workflow.trigger == new_trigger).all()
+    existing = db.query(Workflow).filter(Workflow.trigger == new_trigger, Workflow.user_id == current_user.id).all()
     for ex in existing:
         if json.dumps(ex.condition, sort_keys=True) == new_condition_str:
             return ex # Return already existing instead of duplicate
@@ -61,7 +62,8 @@ def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db))
         trigger=parsed["trigger"],
         condition=parsed.get("condition"),
         actions=parsed["actions"],
-        is_active=True
+        is_active=True,
+        user_id=current_user.id
     )
     db.add(db_workflow)
     db.commit()
@@ -70,8 +72,8 @@ def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db))
 
 
 @router.patch("/{workflow_id}/toggle")
-def toggle_workflow(workflow_id: int, db: Session = Depends(get_db)):
-    wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+def toggle_workflow(workflow_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    wf = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.user_id == current_user.id).first()
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     wf.is_active = not wf.is_active
@@ -80,8 +82,8 @@ def toggle_workflow(workflow_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{workflow_id}", status_code=204)
-def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
-    wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+def delete_workflow(workflow_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    wf = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.user_id == current_user.id).first()
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     db.delete(wf)

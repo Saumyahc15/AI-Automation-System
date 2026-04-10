@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from .database import engine, Base
-from .routers import products, orders, customers, suppliers, workflows, logs, intelligence, reports
+from .routers import products, orders, customers, suppliers, workflows, logs, intelligence, reports, auth, restock, notifications
 from .groq_client.client import test_groq_connection
 from .engine.watchers import (
     run_stock_watcher,
@@ -50,6 +50,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 app.include_router(customers.router)
@@ -58,6 +59,8 @@ app.include_router(workflows.router)
 app.include_router(logs.router)
 app.include_router(intelligence.router)
 app.include_router(reports.router)
+app.include_router(restock.router)
+app.include_router(notifications.router)
 
 @app.get("/")
 def root():

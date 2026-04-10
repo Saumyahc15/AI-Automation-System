@@ -7,15 +7,17 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
-def send_telegram(message: str):
-    if not BOT_TOKEN or not CHAT_ID:
+def send_telegram(message: str, bot_token: str = None, chat_id: str = None):
+    token = bot_token or BOT_TOKEN
+    chat = chat_id or CHAT_ID
+    if not token or not chat:
         print(f"[TELEGRAM SKIP] No credentials. Message: {message}")
         return
 
     async def _send():
         from telegram import Bot
-        bot = Bot(token=BOT_TOKEN)
-        await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="HTML")
+        bot = Bot(token=token)
+        await bot.send_message(chat_id=chat, text=message, parse_mode="HTML")
 
     try:
         asyncio.run(_send())
@@ -25,6 +27,6 @@ def send_telegram(message: str):
         raise
 
 
-def alert_manager(subject: str, detail: str):
+def alert_manager(subject: str, detail: str, bot_token: str = None, chat_id: str = None):
     message = f"<b>RetailAI Alert</b>\n<b>{subject}</b>\n\n{detail}"
-    send_telegram(message)
+    send_telegram(message, bot_token, chat_id)

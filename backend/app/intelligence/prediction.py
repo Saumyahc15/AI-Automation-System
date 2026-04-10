@@ -73,9 +73,11 @@ Current inventory snapshot:
 Products predicted to run out within {horizon_days} days (based on sales velocity):
 {at_risk_summary}
 
-Write a concise, actionable forecast for the store owner in 3-4 sentences.
-Highlight the most urgent items and recommend what to reorder first.
-Be specific with product names and numbers."""
+Provide a detailed inventory forecast for the store owner. 
+Focus on explaining why certain items are at risk based on their sales speed. 
+Recommend specific actions for each high-alert item. Since the owner will listen to this report via voice, make the structure clear and easy to follow. 
+Use a helpful, professional tone. Be specific with product names and numbers.
+"""
 
     narrative = ask_groq(prompt, system="You are a helpful retail inventory analyst. Be concise and data-driven.")
 
