@@ -10,13 +10,13 @@ const inp = {
 const label = { fontSize: 12, color: "var(--text2)", marginBottom: 4, display: "block" };
 
 export default function Modal({ open, onClose, onSubmit, initial, suppliers }) {
-  const empty = { name: "", category: "Grains & Pulses", stock: 0, price: 0, low_stock_threshold: 10, supplier_id: "" };
+  const empty = { name: "", category: "Grains & Pulses", stock: 0, price: 0, cost_price: 0, low_stock_threshold: 10, supplier_id: "" };
   const [form, setForm] = useState(empty);
 
   useEffect(() => {
     setForm(initial ? {
       name: initial.name, category: initial.category,
-      stock: initial.stock, price: initial.price,
+      stock: initial.stock, price: initial.price, cost_price: initial.cost_price || 0,
       low_stock_threshold: initial.low_stock_threshold,
       supplier_id: initial.supplier?.id || ""
     } : empty);
@@ -64,8 +64,12 @@ export default function Modal({ open, onClose, onSubmit, initial, suppliers }) {
             <input style={inp} type="number" value={form.stock} onChange={e => set("stock", +e.target.value)} />
           </div>
           <div>
-            <label style={label}>Price (₹)</label>
+            <label style={label}>Selling Price (₹)</label>
             <input style={inp} type="number" value={form.price} onChange={e => set("price", +e.target.value)} />
+          </div>
+          <div>
+            <label style={label}>Cost Price (₹)</label>
+            <input style={inp} type="number" value={form.cost_price} onChange={e => set("cost_price", +e.target.value)} />
           </div>
           <div>
             <label style={label}>Low stock threshold</label>

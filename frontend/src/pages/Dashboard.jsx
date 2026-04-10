@@ -14,6 +14,12 @@ export default function Dashboard() {
   const lowStock = products.filter(p => p.stock > 0 && p.stock <= p.low_stock_threshold);
   const outOfStock = products.filter(p => p.stock === 0);
   const totalValue = products.reduce((s, p) => s + p.stock * p.price, 0);
+  const totalRevenue = orders.reduce((s, o) => s + o.total_amount, 0);
+  const totalProfit = products.reduce((s, p) => {
+    const sold = orders.reduce((sum, o) => sum + o.items.filter(i => i.product_id === p.id).reduce((isum, ii) => isum + ii.quantity, 0), 0);
+    return s + (sold * (p.price - (p.cost_price || 0)));
+  }, 0);
+  const avgMargin = products.filter(p => p.profit_margin).reduce((s, p) => s + p.profit_margin, 0) / (products.filter(p => p.profit_margin).length || 1);
 
   const categoryCounts = products.reduce((acc, p) => {
     acc[p.category] = (acc[p.category] || 0) + p.stock;
@@ -35,11 +41,11 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total products" value={products.length} sub="+33 seeded" subColor="var(--accent)" />
+        <StatCard label="Total Revenue" value={`₹${(totalRevenue/1000).toFixed(1)}K`} sub="Current orders" subColor="var(--accent)" />
+        <StatCard label="Total Profit" value={`₹${(totalProfit/1000).toFixed(1)}K`} sub="Gross profit" subColor="var(--accent)" />
+        <StatCard label="Avg Margin" value={`${avgMargin.toFixed(1)}%`} sub="Overall performance" subColor="var(--info)" />
         <StatCard label="Low stock" value={lowStock.length} sub="Needs attention" subColor="var(--warning)" />
         <StatCard label="Out of stock" value={outOfStock.length} sub="Action required" subColor="var(--danger)" />
-        <StatCard label="Stock value" value={`₹${(totalValue/1000).toFixed(1)}K`} sub="Total inventory" subColor="var(--text3)" />
-        <StatCard label="Active automations" value={activeWorkflows.length} sub="Running workflows" subColor="var(--info)" />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>

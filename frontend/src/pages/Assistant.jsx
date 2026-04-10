@@ -283,7 +283,10 @@ function VoiceButton({ onTranscript, disabled }) {
   );
 }
 
-function ChatHistory({ history, loading }) {
+
+
+
+function ChatHistory({ history, loading, currentlySpeaking, onSpeak, onStop }) {
   if (history.length === 0 && !loading) return null;
   return (
     <div style={{ marginBottom:16, display:"flex", flexDirection:"column", gap:10 }}>
@@ -293,9 +296,22 @@ function ChatHistory({ history, loading }) {
             <div style={{ background:"var(--accent)", color:"#fff", padding:"10px 14px", borderRadius:"12px 12px 2px 12px", fontSize:13, maxWidth:"80%" }}>{msg.text}</div>
           )}
           {(msg.role === "ai" || msg.role === "answer") && (
-            <div style={{ maxWidth:"85%" }}>
+            <div style={{ maxWidth:"85%", position: "relative" }}>
               <div style={{ background:"var(--surface)", border:"0.5px solid var(--border)", padding:"10px 14px", borderRadius:"12px 12px 12px 2px", fontSize:13, lineHeight:1.7 }}>
                 {msg.text}
+                <button 
+                  onClick={() => currentlySpeaking === msg.text ? onStop() : onSpeak(msg.text)}
+                  style={{ 
+                    display: "inline-flex", marginLeft: 8, padding: "2px 6px", 
+                    borderRadius: 6, border: "0.5px solid var(--border2)", 
+                    background: currentlySpeaking === msg.text ? "var(--danger-light)" : "var(--surface2)",
+                    color: currentlySpeaking === msg.text ? "var(--danger)" : "inherit",
+                    fontSize: 10, cursor: "pointer", verticalAlign: "middle", opacity: 0.8
+                  }}
+                  title={currentlySpeaking === msg.text ? "Stop listening" : "Listen to answer"}
+                >
+                  {currentlySpeaking === msg.text ? "⏹ Stop" : "🔊 Listen"}
+                </button>
               </div>
               {msg.workflow && <WorkflowCard wf={msg.workflow} />}
             </div>
@@ -316,6 +332,7 @@ function ChatHistory({ history, loading }) {
     </div>
   );
 }
+
 
 function ChatInput({ value, onChange, onSubmit, disabled, placeholder, loading }) {
   return (
@@ -351,8 +368,43 @@ export default function Assistant() {
   const [loading, setLoading] = useState(false);
   const [qaLoading, setQaLoading] = useState(false);
   const [history, setHistory] = useState([]);
+  const [currentlySpeaking, setCurrentlySpeaking] = useState(null);
+
+  const handleSpeak = (text) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    
+    const isHindi = /[\u0900-\u097F]/.test(text);
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    
+    let voice;
+    if (isHindi) {
+      voice = voices.find(v => v.lang.startsWith("hi") || v.name.toLowerCase().includes("hindi"));
+      utterance.lang = "hi-IN";
+    } else {
+      voice = voices.find(v => v.name.toLowerCase().includes("us english") || v.name.includes("Samantha") || v.name.includes("Female")) || 
+              voices.find(v => v.lang.startsWith("en"));
+      utterance.lang = "en-US";
+    }
+    
+    if (voice) utterance.voice = voice;
+    
+    utterance.onstart = () => setCurrentlySpeaking(text);
+    utterance.onend = () => setCurrentlySpeaking(null);
+    utterance.onerror = () => setCurrentlySpeaking(null);
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+
+  const handleStopSpeech = () => {
+    window.speechSynthesis.cancel();
+    setCurrentlySpeaking(null);
+  };
 
   const handleCreateWorkflow = async () => {
+
     if (!input.trim()) return;
     const text = input.trim();
     setInput("");
@@ -433,8 +485,15 @@ export default function Assistant() {
               </div>
             </div>
           )}
-          <ChatHistory history={history} loading={loading} />
+          <ChatHistory 
+            history={history} 
+            loading={loading} 
+            currentlySpeaking={currentlySpeaking}
+            onSpeak={handleSpeak}
+            onStop={handleStopSpeech}
+          />
           <ChatInput
+
             value={input} onChange={setInput}
             onSubmit={handleCreateWorkflow}
             disabled={isWorking}
@@ -464,8 +523,15 @@ export default function Assistant() {
               </div>
             </div>
           )}
-          <ChatHistory history={history} loading={qaLoading} />
+          <ChatHistory 
+            history={history} 
+            loading={qaLoading} 
+            currentlySpeaking={currentlySpeaking}
+            onSpeak={handleSpeak}
+            onStop={handleStopSpeech}
+          />
           <ChatInput
+
             value={input} onChange={setInput}
             onSubmit={() => handleAskQuestion(null)}
             disabled={isWorking}

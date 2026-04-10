@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import api from "../api/client";
 import toast from "react-hot-toast";
 
 const inp = {
@@ -18,29 +19,63 @@ const Section = ({ title, children }) => (
 
 export default function Settings() {
   const [saved, setSaved] = useState(false);
+  const [config, setConfig] = useState({
+    smtp_host: "smtp.gmail.com",
+    smtp_port: 587,
+    smtp_user: "",
+    smtp_password: "",
+    manager_email: "",
+    telegram_bot_token: "",
+    telegram_chat_id: "",
+    twilio_sid: "",
+    twilio_token: "",
+    twilio_from: ""
+  });
 
-  const handleSave = () => {
-    toast.success("Settings noted — update your .env file manually to apply changes.");
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const { data } = await api.get("/auth/config");
+        setConfig((prev) => ({ ...prev, ...data }));
+      } catch (err) {
+        toast.error("Failed to load user configuration");
+      }
+    };
+    fetchConfig();
+  }, []);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setConfig((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSave = async () => {
+    try {
+      await api.patch("/auth/config", config);
+      toast.success("Settings saved successfully.");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      toast.error("Failed to save settings");
+    }
   };
 
   return (
     <div style={{ maxWidth:640 }}>
       <div style={{ marginBottom:24 }}>
-        <h1 style={{ fontSize:20, fontWeight:600 }}>Settings</h1>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>Account Settings</h1>
         <p style={{ color:"var(--text2)", fontSize:13, marginTop:2 }}>
-          Configure your notification credentials. Changes must be applied to your <code style={{ fontFamily:"DM Mono, monospace", fontSize:12, background:"var(--surface2)", padding:"1px 5px", borderRadius:4 }}>.env</code> file and server restarted.
+          Configure your personal notification credentials. Workflows will dynamically sync with these settings.
         </p>
       </div>
 
       <Section title="Email (SMTP)">
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-          <div><label style={label}>SMTP host</label><input style={inp} defaultValue="smtp.gmail.com" readOnly /></div>
-          <div><label style={label}>SMTP port</label><input style={inp} defaultValue="587" readOnly /></div>
-          <div><label style={label}>Gmail address</label><input style={inp} placeholder="you@gmail.com" /></div>
-          <div><label style={label}>App password</label><input style={inp} type="password" placeholder="16-char app password" /></div>
-          <div style={{ gridColumn:"span 2" }}><label style={label}>Manager email (receives alerts)</label><input style={inp} placeholder="manager@gmail.com" /></div>
+          <div><label style={label}>SMTP host</label><input style={inp} name="smtp_host" value={config.smtp_host || ""} onChange={handleChange} /></div>
+          <div><label style={label}>SMTP port</label><input style={inp} type="number" name="smtp_port" value={config.smtp_port || 587} onChange={handleChange} /></div>
+          <div><label style={label}>Gmail address</label><input style={inp} name="smtp_user" value={config.smtp_user || ""} onChange={handleChange} placeholder="you@gmail.com" /></div>
+          <div><label style={label}>App password</label><input style={inp} type="password" name="smtp_password" value={config.smtp_password || ""} onChange={handleChange} placeholder="16-char app password" /></div>
+          <div style={{ gridColumn:"span 2" }}><label style={label}>Manager email (receives alerts)</label><input style={inp} name="manager_email" value={config.manager_email || ""} onChange={handleChange} placeholder="manager@gmail.com" /></div>
         </div>
         <div style={{ marginTop:12, padding:"10px 14px", background:"var(--info-light, #E6F1FB)", borderRadius:8, fontSize:12, color:"var(--info, #185FA5)" }}>
           Use a Gmail App Password, not your normal password. Generate one at Google Account → Security → App passwords.
@@ -49,52 +84,41 @@ export default function Settings() {
 
       <Section title="Telegram bot">
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-          <div><label style={label}>Bot token</label><input style={inp} type="password" placeholder="From @BotFather" /></div>
-          <div><label style={label}>Chat ID</label><input style={inp} placeholder="Your chat ID number" /></div>
+          <div><label style={label}>Bot token</label><input style={inp} type="password" name="telegram_bot_token" value={config.telegram_bot_token || ""} onChange={handleChange} placeholder="From @BotFather" /></div>
+          <div><label style={label}>Chat ID</label><input style={inp} name="telegram_chat_id" value={config.telegram_chat_id || ""} onChange={handleChange} placeholder="Your chat ID number" /></div>
         </div>
         <div style={{ marginTop:12, padding:"10px 14px", background:"var(--info-light, #E6F1FB)", borderRadius:8, fontSize:12, color:"var(--info, #185FA5)" }}>
           Get your bot token from @BotFather on Telegram. Get your chat ID by messaging the bot once then visiting api.telegram.org/bot&lt;TOKEN&gt;/getUpdates.
         </div>
       </Section>
 
-      <Section title="Groq API">
-        <div><label style={label}>API key</label><input style={inp} type="password" placeholder="gsk_..." /></div>
-        <div style={{ marginTop:12, padding:"10px 14px", background:"var(--success-light, #EAF3DE)", borderRadius:8, fontSize:12, color:"var(--success, #3B6D11)" }}>
-          Get your free API key at console.groq.com. Model in use: llama-3.3-70b-versatile.
-        </div>
-      </Section>
-
-      <Section title="Watcher intervals">
+      <Section title="WhatsApp (Twilio)">
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-          <div>
-            <label style={label}>Stock watcher (seconds)</label>
-            <input style={inp} type="number" defaultValue={30} readOnly />
-          </div>
-          <div>
-            <label style={label}>Order watcher (hours)</label>
-            <input style={inp} type="number" defaultValue={1} readOnly />
-          </div>
-          <div>
-            <label style={label}>Customer watcher (hours)</label>
-            <input style={inp} type="number" defaultValue={6} readOnly />
-          </div>
-          <div>
-            <label style={label}>Daily report time</label>
-            <input style={inp} defaultValue="21:00" readOnly />
-          </div>
+          <div style={{ gridColumn:"span 2" }}><label style={label}>Twilio Account SID</label><input style={inp} type="password" name="twilio_sid" value={config.twilio_sid || ""} onChange={handleChange} /></div>
+          <div style={{ gridColumn:"span 2" }}><label style={label}>Twilio Auth Token</label><input style={inp} type="password" name="twilio_token" value={config.twilio_token || ""} onChange={handleChange} /></div>
+          <div><label style={label}>Twilio WhatsApp Number</label><input style={inp} name="twilio_from" value={config.twilio_from || ""} onChange={handleChange} placeholder="+14155238886" /></div>
         </div>
-        <div style={{ marginTop:12, padding:"10px 14px", background:"var(--surface2)", borderRadius:8, fontSize:12, color:"var(--text2)" }}>
-          To change watcher intervals, edit the scheduler jobs in <code style={{ fontFamily:"DM Mono, monospace" }}>backend/app/main.py</code>.
+        <div style={{ marginTop:12, padding:"10px 14px", background:"var(--info-light, #E6F1FB)", borderRadius:8, fontSize:12, color:"var(--info, #185FA5)" }}>
+          Twilio Sandbox for WhatsApp requires a From number. Setup your sandbox at Twilio Console → Messaging → Try it Out → WhatsApp Sandbox.
         </div>
       </Section>
 
-      <button onClick={handleSave} style={{
-        padding:"10px 24px", borderRadius:8, border:"none",
-        background:"var(--accent)", color:"#fff",
-        fontWeight:500, cursor:"pointer", fontSize:14
-      }}>
-        {saved ? "Saved ✓" : "Save settings"}
-      </button>
+      <div style={{ display: 'flex', gap: '12px' }}>
+        <button onClick={handleSave} style={{
+          padding:"10px 24px", borderRadius:8, border:"none",
+          background:"var(--accent)", color:"#fff",
+          fontWeight:500, cursor:"pointer", fontSize:14
+        }}>
+          {saved ? "Saved ✓" : "Save settings"}
+        </button>
+        <button onClick={() => { localStorage.removeItem("token"); window.location.reload(); }} style={{
+          padding:"10px 24px", borderRadius:8, border:"1px solid var(--border)",
+          background:"transparent", color:"var(--text)",
+          fontWeight:500, cursor:"pointer", fontSize:14
+        }}>
+          Logout
+        </button>
+      </div>
     </div>
   );
 }

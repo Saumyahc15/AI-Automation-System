@@ -22,7 +22,7 @@ export default function Customers() {
       <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
         {isLoading ? <p style={{ padding: 24, color: "var(--text2)" }}>Loading...</p> : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Name","Email","Phone","Last purchase","Status"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Name","Email","Orders","Spent","Last purchase","Status"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {customers.map(c => {
                 const days = daysSince(c.last_purchase);
@@ -33,7 +33,8 @@ export default function Customers() {
                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <td style={{ ...td, fontWeight: 500 }}>{c.name}</td>
                     <td style={{ ...td, color: "var(--text2)" }}>{c.email}</td>
-                    <td style={td}>{c.phone}</td>
+                    <td style={td}>{c.total_orders || 0}</td>
+                    <td style={{ ...td, fontWeight: 500 }}>₹{(c.total_spent || 0).toFixed(2)}</td>
                     <td style={{ ...td, color: inactive ? "var(--warning)" : "var(--text2)" }}>
                       {days !== null ? `${days} days ago` : "Never"}
                     </td>

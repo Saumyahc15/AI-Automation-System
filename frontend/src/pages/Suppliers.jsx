@@ -9,7 +9,7 @@ const inp = { width: "100%", padding: "8px 10px", border: "0.5px solid var(--bor
 
 export default function Suppliers() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: "", email: "", phone: "", company: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", telegram_chat_id: "" });
   const [showForm, setShowForm] = useState(false);
 
   const { data: suppliers = [] } = useQuery({
@@ -19,7 +19,7 @@ export default function Suppliers() {
 
   const addMutation = useMutation({
     mutationFn: (data) => api.post("/suppliers", data),
-    onSuccess: () => { qc.invalidateQueries(["suppliers"]); toast.success("Supplier added!"); setShowForm(false); setForm({ name: "", email: "", phone: "", company: "" }); },
+    onSuccess: () => { qc.invalidateQueries(["suppliers"]); toast.success("Supplier added!"); setShowForm(false); setForm({ name: "", email: "", phone: "", company: "", telegram_chat_id: "" }); },
     onError: () => toast.error("Failed to add supplier")
   });
 
@@ -43,7 +43,7 @@ export default function Suppliers() {
       {showForm && (
         <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 20, marginBottom: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            {[["name","Name"],["email","Email"],["phone","Phone"],["company","Company"]].map(([k, lbl]) => (
+            {[["name","Name"],["email","Email"],["phone","Phone"],["company","Company"],["telegram_chat_id", "Telegram Chat ID"]].map(([k, lbl]) => (
               <div key={k}>
                 <label style={{ fontSize: 12, color: "var(--text2)", marginBottom: 4, display: "block" }}>{lbl}</label>
                 <input style={inp} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} placeholder={lbl} />
@@ -58,7 +58,7 @@ export default function Suppliers() {
 
       <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Name","Company","Email","Phone","Actions"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Name","Company","Email","Phone","Telegram Chat ID","Actions"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>
             {suppliers.map(s => (
               <tr key={s.id}
@@ -68,6 +68,7 @@ export default function Suppliers() {
                 <td style={{ ...td, color: "var(--text2)" }}>{s.company || "—"}</td>
                 <td style={td}>{s.email}</td>
                 <td style={{ ...td, color: "var(--text2)" }}>{s.phone || "—"}</td>
+                <td style={{ ...td, color: "var(--text2)" }}>{s.telegram_chat_id || "—"}</td>
                 <td style={td}>
                   <button onClick={() => { if (confirm(`Remove ${s.name}?`)) deleteMutation.mutate(s.id); }} style={{ padding: "4px 10px", fontSize: 11, borderRadius: 4, cursor: "pointer", border: "0.5px solid #f09595", background: "var(--danger-light)", color: "var(--danger)" }}>Remove</button>
                 </td>

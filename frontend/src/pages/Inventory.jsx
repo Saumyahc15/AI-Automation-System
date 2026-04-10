@@ -102,7 +102,7 @@ export default function Inventory() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Product","SKU","Category","Stock","Price","Status","Actions"].map(h => <th key={h} style={th}>{h}</th>)}
+                {["Product","SKU","Category","Stock","Price/Cost","Margin","Status","Actions"].map(h => <th key={h} style={th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -131,7 +131,20 @@ export default function Inventory() {
                       >{p.stock}</span>
                     )}
                   </td>
-                  <td style={td}>₹{p.price}</td>
+                  <td style={td}>
+                    <div>₹{p.price}</div>
+                    <div style={{ fontSize: 10, color: "var(--text3)" }}>Cost: ₹{p.cost_price || 0}</div>
+                  </td>
+                  <td style={td}>
+                    {p.profit_margin !== undefined ? (
+                      <span style={{ 
+                        color: p.profit_margin > 20 ? "var(--accent)" : p.profit_margin > 0 ? "var(--warning)" : "var(--danger)",
+                        fontWeight: 500
+                      }}>
+                        {p.profit_margin}%
+                      </span>
+                    ) : "—"}
+                  </td>
                   <td style={td}><StatusBadge stock={p.stock} threshold={p.low_stock_threshold} /></td>
                   <td style={td}>
                     <div style={{ display: "flex", gap: 6 }}>
