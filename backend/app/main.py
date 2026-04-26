@@ -1,75 +1,131 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-from apscheduler.schedulers.background import BackgroundScheduler
-from .database import engine, Base
-from .routers import products, orders, customers, suppliers, workflows, logs, intelligence, reports, auth, restock, notifications
-from .groq_client.client import test_groq_connection
-from .engine.watchers import (
-    run_stock_watcher,
-    run_order_watcher,
-    run_customer_watcher,
-    run_daily_report,
-    run_demand_watcher
+from sqlalchemy import text
+from app.database import Base, engine
+from app.routers import (
+    products, orders, customers, workflows,
+    ai, analytics, auth, gmail, sheets,
+    settings, reports
 )
+from app.tasks.scheduler import start_scheduler
 
+# Import models to ensure they're registered with Base
+from app.models.user import User
+from app.models.gmail_thread_state import GmailThreadState
+from app.models.coupon import Coupon
+from app.models.delay_analytics import DelayAnalytics
+
+# Create all tables
 Base.metadata.create_all(bind=engine)
 
-scheduler = BackgroundScheduler()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Stock watcher — every 30 seconds
-    scheduler.add_job(run_stock_watcher, "interval", seconds=30, id="stock_watcher")
-    # Order delay watcher — every hour
-    scheduler.add_job(run_order_watcher, "interval", hours=1, id="order_watcher")
-    # Customer inactivity — every 6 hours
-    scheduler.add_job(run_customer_watcher, "interval", hours=6, id="customer_watcher")
-    # Daily report — every day at 9 PM
-    scheduler.add_job(run_daily_report, "cron", hour=21, minute=0, id="daily_report")
-    # Demand watcher — every 15 mins
-    scheduler.add_job(run_demand_watcher, "interval", minutes=15, id="demand_watcher")
-    scheduler.start()
-    print("[SCHEDULER] All watchers started.")
-    yield
-    scheduler.shutdown()
-    print("[SCHEDULER] Stopped.")
+def _ensure_workflow_notification_channel_column():
+    """
+    Lightweight runtime migration to keep existing DBs compatible
+    when notification_channel is introduced.
+    """
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            inspector = conn.exec_driver_sql("PRAGMA table_info(workflows)").fetchall()
+            if inspector:
+                columns = {row[1] for row in inspector}
+                if "notification_channel" not in columns:
+                    conn.execute(text("ALTER TABLE workflows ADD COLUMN notification_channel VARCHAR DEFAULT 'gmail'"))
+            return
+        
+        cols = conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'workflows'
+        """)).fetchall()
+        columns = {row[0] for row in cols}
+        if "notification_channel" not in columns:
+            conn.execute(text("ALTER TABLE workflows ADD COLUMN notification_channel VARCHAR DEFAULT 'gmail'"))
+
+
+def _ensure_workflow_calendar_event_column():
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            inspector = conn.exec_driver_sql("PRAGMA table_info(workflows)").fetchall()
+            if inspector:
+                columns = {row[1] for row in inspector}
+                if "calendar_event_id" not in columns:
+                    conn.execute(text("ALTER TABLE workflows ADD COLUMN calendar_event_id VARCHAR"))
+            return
+
+        cols = conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'workflows'
+        """)).fetchall()
+        columns = {row[0] for row in cols}
+        if "calendar_event_id" not in columns:
+            conn.execute(text("ALTER TABLE workflows ADD COLUMN calendar_event_id VARCHAR"))
+
+
+_ensure_workflow_notification_channel_column()
+_ensure_workflow_calendar_event_column()
+
+
+def _ensure_order_extra_columns():
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            inspector = conn.exec_driver_sql("PRAGMA table_info(orders)").fetchall()
+            if inspector:
+                columns = {row[1] for row in inspector}
+                if "shipping_address" not in columns:
+                    conn.execute(text("ALTER TABLE orders ADD COLUMN shipping_address VARCHAR"))
+                if "payment_method" not in columns:
+                    conn.execute(text("ALTER TABLE orders ADD COLUMN payment_method VARCHAR"))
+            return
+
+        cols = conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'orders'
+        """)).fetchall()
+        columns = {row[0] for row in cols}
+        if "shipping_address" not in columns:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN shipping_address VARCHAR"))
+        if "payment_method" not in columns:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN payment_method VARCHAR"))
+
+
+_ensure_order_extra_columns()
 
 app = FastAPI(
-    title="RetailAI API",
-    description="AI-Powered Retail Automation Agent",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Retail AI Agent API",
+    description="AI-powered retail automation with Gmail, Google Sheets, and Google Calendar",
+    version="1.0.0"
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(products.router)
-app.include_router(orders.router)
-app.include_router(customers.router)
-app.include_router(suppliers.router)
-app.include_router(workflows.router)
-app.include_router(logs.router)
-app.include_router(intelligence.router)
-app.include_router(reports.router)
-app.include_router(restock.router)
-app.include_router(notifications.router)
+# Register all routers
+app.include_router(auth.router,               prefix="/api/auth",      tags=["Authentication"])
+app.include_router(products.router,         prefix="/api/products",  tags=["Products"])
+app.include_router(orders.router,           prefix="/api/orders",    tags=["Orders"])
+app.include_router(customers.router,        prefix="/api/customers", tags=["Customers"])
+app.include_router(workflows.router,        prefix="/api/workflows", tags=["Workflows"])
+app.include_router(ai.router,               prefix="/api/ai",        tags=["AI"])
+app.include_router(gmail.router,            prefix="/api/gmail",     tags=["Gmail"])
+app.include_router(sheets.router,           prefix="/api/sheets",    tags=["Sheets"])
+app.include_router(analytics.router,        prefix="/api/analytics", tags=["Analytics"])
+app.include_router(settings.router,         prefix="/api/settings",  tags=["Settings"])
+app.include_router(reports.router,          prefix="/api/reports",   tags=["Reports"])
+
+
+@app.on_event("startup")
+async def startup():
+    start_scheduler()
+
 
 @app.get("/")
 def root():
-    return {"message": "RetailAI API is running", "docs": "/docs"}
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.get("/test-groq")
-def test_groq():
-    return test_groq_connection()
+    return {"status": "Retail AI Agent running", "docs": "/docs"}

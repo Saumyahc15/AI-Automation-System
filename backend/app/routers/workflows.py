@@ -1,90 +1,113 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models.workflow import Workflow
+from app.models.workflow_log import WorkflowLog
+from app.models.user import User
+from app.services.llm_parser import parse_workflow
+from app.services.auth_service import get_current_user, check_manager
+from app.schemas.workflow import WorkflowCreate, WorkflowOut
 from typing import List
-from pydantic import BaseModel
-from ..database import get_db
-from ..models import Workflow, User
-from ..schemas import WorkflowCreate, WorkflowOut
-from ..auth_handler import get_current_user
-from ..groq_client.client import parse_nl_to_workflow
-import json
 
-router = APIRouter(prefix="/workflows", tags=["Workflows"])
+router = APIRouter()
 
 
-class NLRequest(BaseModel):
-    text: str
+@router.post("/create", response_model=dict)
+def create_workflow(
+    data: WorkflowCreate,
+    current_user: User = Depends(check_manager),
+    db: Session = Depends(get_db)
+):
+    """Parse natural language and save workflow to DB. Manager+ access."""
+    parsed = parse_workflow(data.natural_language_input)
+    wf = Workflow(
+        user_id=current_user.user_id,
+        natural_language_input=data.natural_language_input,
+        trigger_type=parsed["trigger_type"],
+        condition_json=parsed.get("condition", {}),
+        actions_json=parsed.get("actions", []),
+        notification_channel=parsed.get("notification_channel", "gmail"),
+        frequency=parsed.get("frequency", "every_15_min"),
+    )
+    db.add(wf)
+    db.commit()
+    db.refresh(wf)
+    # Create Google Calendar reminder for workflow schedule/expectation.
+    try:
+        from app.services.calendar_service import create_or_update_workflow_calendar_event
+        event_id = create_or_update_workflow_calendar_event(wf)
+        if event_id:
+            wf.calendar_event_id = event_id
+            db.commit()
+    except Exception:
+        pass
+    try:
+        from app.tasks.scheduler import sync_workflow_jobs
+        sync_workflow_jobs()
+    except Exception:
+        pass
+    return {"workflow_id": wf.workflow_id, "parsed": parsed, "status": "active", "created_by": current_user.email}
 
 
 @router.get("/", response_model=List[WorkflowOut])
-def get_workflows(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(Workflow).filter(Workflow.user_id == current_user.id).order_by(Workflow.created_at.desc()).all()
+def list_workflows(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List active workflows. All authenticated users."""
+    return db.query(Workflow).filter(Workflow.is_active == True).order_by(
+        Workflow.created_at.desc()
+    ).all()
 
 
-@router.post("/", response_model=WorkflowOut, status_code=201)
-def create_workflow(workflow: WorkflowCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db_workflow = Workflow(**workflow.model_dump(), user_id=current_user.id)
-    db.add(db_workflow)
-    db.commit()
-    db.refresh(db_workflow)
-    return db_workflow
+@router.get("/{workflow_id}/logs")
+def get_logs(
+    workflow_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """View execution history. All authenticated users."""
+    return db.query(WorkflowLog).filter(
+        WorkflowLog.workflow_id == workflow_id
+    ).order_by(WorkflowLog.executed_at.desc()).limit(20).all()
 
 
-@router.post("/parse", response_model=WorkflowOut, status_code=201)
-def parse_and_create_workflow(request: NLRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Takes a natural language string, sends to Groq,
-    gets back structured JSON, saves it as a workflow.
-    """
+@router.post("/{workflow_id}/run-now")
+def run_workflow_now(
+    workflow_id: int,
+    current_user: User = Depends(check_manager),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger a workflow for demo purposes. Manager+ access."""
+    from app.services.execution_engine import _execute_workflow
+    wf = db.query(Workflow).filter(Workflow.workflow_id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    _execute_workflow(wf, db)
+    return {"status": "executed", "workflow_id": workflow_id, "triggered_by": current_user.email}
+
+
+@router.delete("/{workflow_id}")
+def deactivate_workflow(
+    workflow_id: int,
+    current_user: User = Depends(check_manager),
+    db: Session = Depends(get_db)
+):
+    """Deactivate a workflow. Manager+ access."""
+    wf = db.query(Workflow).filter(Workflow.workflow_id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
     try:
-        parsed = parse_nl_to_workflow(request.text)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    # Validate required fields came back
-    required = ["name", "trigger", "actions"]
-    for field in required:
-        if field not in parsed:
-            raise HTTPException(status_code=422, detail=f"Groq response missing field: {field}")
-
-    # Duplicate check: check if a workflow with same trigger and condition already exists
-    new_trigger = parsed["trigger"]
-    new_condition_str = json.dumps(parsed.get("condition"), sort_keys=True)
-    
-    existing = db.query(Workflow).filter(Workflow.trigger == new_trigger, Workflow.user_id == current_user.id).all()
-    for ex in existing:
-        if json.dumps(ex.condition, sort_keys=True) == new_condition_str:
-            return ex # Return already existing instead of duplicate
-
-    db_workflow = Workflow(
-        name=parsed.get("name", "Unnamed workflow"),
-        description=parsed.get("description", ""),
-        trigger=parsed["trigger"],
-        condition=parsed.get("condition"),
-        actions=parsed["actions"],
-        is_active=True,
-        user_id=current_user.id
-    )
-    db.add(db_workflow)
+        from app.services.calendar_service import delete_workflow_calendar_event
+        delete_workflow_calendar_event(wf.calendar_event_id or "")
+    except Exception:
+        pass
+    wf.is_active = False
+    wf.calendar_event_id = None
     db.commit()
-    db.refresh(db_workflow)
-    return db_workflow
-
-
-@router.patch("/{workflow_id}/toggle")
-def toggle_workflow(workflow_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    wf = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.user_id == current_user.id).first()
-    if not wf:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    wf.is_active = not wf.is_active
-    db.commit()
-    return {"id": wf.id, "is_active": wf.is_active}
-
-
-@router.delete("/{workflow_id}", status_code=204)
-def delete_workflow(workflow_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    wf = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.user_id == current_user.id).first()
-    if not wf:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    db.delete(wf)
-    db.commit()
+    try:
+        from app.tasks.scheduler import sync_workflow_jobs
+        sync_workflow_jobs()
+    except Exception:
+        pass
+    return {"status": "deactivated", "deactivated_by": current_user.email}
