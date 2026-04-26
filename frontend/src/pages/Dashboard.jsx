@@ -1,96 +1,285 @@
-import { useQuery } from "@tanstack/react-query";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import api from "../api/client";
-import StatCard from "../components/StatCard";
-
-const COLORS = ["#1D9E75","#378ADD","#BA7517","#7F77DD","#D4537E"];
+import { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { analyticsAPI, aiAPI, workflowsAPI } from '../services/api';
+import KPICard from '../components/KPICard';
+import Sidebar from '../components/Sidebar';
+import {
+  RevenueTrendChart,
+  OrderDistributionChart,
+  TopProductsChart,
+  InventoryStatusChart,
+  CategorySalesChart,
+  ActivityTimelineChart,
+} from '../components/DashboardCharts';
+import {
+  ShoppingCart,
+  Package,
+  AlertCircle,
+  Zap,
+  DollarSign,
+} from 'lucide-react';
 
 export default function Dashboard() {
-  const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: () => api.get("/products").then(r => r.data) });
-  const { data: orders = [] } = useQuery({ queryKey: ["orders"], queryFn: () => api.get("/orders").then(r => r.data) });
-  const { data: customers = [] } = useQuery({ queryKey: ["customers"], queryFn: () => api.get("/customers").then(r => r.data) });
-  const { data: workflows = [] } = useQuery({ queryKey: ["workflows"], queryFn: () => api.get("/workflows").then(r => r.data) });
+  const { user, hasRole } = useAuth();
+  const [analytics, setAnalytics] = useState(null);
+  const [dashboardError, setDashboardError] = useState(null);
+  const [revenueChart, setRevenueChart] = useState([]);
+  const [orderDistribution, setOrderDistribution] = useState([]);
+  const [topProducts, setTopProducts] = useState([]);
+  const [inventoryStatus, setInventoryStatus] = useState([]);
+  const [categorySales, setCategorySales] = useState([]);
+  const [activityTimeline, setActivityTimeline] = useState([]);
+  const [workflows, setWorkflows] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const lowStock = products.filter(p => p.stock > 0 && p.stock <= p.low_stock_threshold);
-  const outOfStock = products.filter(p => p.stock === 0);
-  const totalValue = products.reduce((s, p) => s + p.stock * p.price, 0);
-  const totalRevenue = orders.reduce((s, o) => s + o.total_amount, 0);
-  const totalProfit = products.reduce((s, p) => {
-    const sold = orders.reduce((sum, o) => sum + o.items.filter(i => i.product_id === p.id).reduce((isum, ii) => isum + ii.quantity, 0), 0);
-    return s + (sold * (p.price - (p.cost_price || 0)));
-  }, 0);
-  const avgMargin = products.filter(p => p.profit_margin).reduce((s, p) => s + p.profit_margin, 0) / (products.filter(p => p.profit_margin).length || 1);
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      setDashboardError(null);
 
-  const categoryCounts = products.reduce((acc, p) => {
-    acc[p.category] = (acc[p.category] || 0) + p.stock;
-    return acc;
-  }, {});
-  const chartData = Object.entries(categoryCounts)
-    .map(([name, stock]) => ({ name: name.split(" ")[0], stock }))
-    .sort((a, b) => b.stock - a.stock);
+      const results = await Promise.allSettled([
+        analyticsAPI.getSummary(),
+        analyticsAPI.getRevenueChart(30),
+        analyticsAPI.getTopProducts(7, 5),
+        analyticsAPI.getOrderDistribution(7),
+        analyticsAPI.getInventoryStatus(),
+        analyticsAPI.getCategorySales(30),
+        analyticsAPI.getActivityTimeline(7),
+      ]);
 
-  const activeWorkflows = workflows.filter(w => w.is_active);
+      const [
+        analyticsRes,
+        revenueRes,
+        productsRes,
+        orderDistributionRes,
+        inventoryStatusRes,
+        categorySalesRes,
+        activityTimelineRes,
+      ] = results;
+
+      if (analyticsRes.status === 'fulfilled') {
+        setAnalytics(analyticsRes.value.data);
+      } else {
+        console.error('Dashboard summary failed:', analyticsRes.reason);
+        setAnalytics({
+          orders_today: 0,
+          revenue_today: 0,
+          orders_this_week: 0,
+          revenue_this_week: 0,
+          total_products: 0,
+          low_stock_products: 0,
+          out_of_stock: 0,
+          total_customers: 0,
+          pending_orders: 0,
+          purchase_orders_sent: 0,
+        });
+        setDashboardError('Some dashboard data could not be loaded. The page is showing whatever data is available.');
+      }
+
+      setRevenueChart(revenueRes.status === 'fulfilled' ? revenueRes.value.data : []);
+      setTopProducts(productsRes.status === 'fulfilled' ? productsRes.value.data : []);
+      setOrderDistribution(orderDistributionRes.status === 'fulfilled' ? orderDistributionRes.value.data : []);
+      setInventoryStatus(inventoryStatusRes.status === 'fulfilled' ? inventoryStatusRes.value.data : []);
+      setCategorySales(categorySalesRes.status === 'fulfilled' ? categorySalesRes.value.data : []);
+      setActivityTimeline(activityTimelineRes.status === 'fulfilled' ? activityTimelineRes.value.data : []);
+
+      if (hasRole(['owner', 'manager'])) {
+        const optionalResults = await Promise.allSettled([
+          workflowsAPI.list(),
+        ]);
+        const [workflowsRes] = optionalResults;
+
+        setWorkflows(workflowsRes.status === 'fulfilled' ? (workflowsRes.value.data || []) : []);
+      }
+
+      setLoading(false);
+    };
+
+    fetchDashboardData();
+  }, [hasRole]);
+
+  if (loading && !analytics) {
+    return (
+      <div className="flex">
+        <Sidebar />
+        <div className="flex-1 bg-gray-50 p-8">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 mb-4">
+              <div className="w-6 h-6 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+            </div>
+            <p className="text-gray-600">Loading dashboard...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const todayRevenue = analytics?.revenue_today || 0;
+  const weekRevenue = analytics?.revenue_this_week || 0;
+  const growthPercentage = weekRevenue > 0 ? Math.round(((todayRevenue / (weekRevenue / 7)) - 1) * 100) : 0;
+  const todayActivity = activityTimeline[activityTimeline.length - 1] || { products: 0, customers: 0, orders: 0 };
 
   return (
-    <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600 }}>Inventory dashboard</h1>
-        <p style={{ color: "var(--text2)", fontSize: 13, marginTop: 2 }}>
-          {products.length} products · {orders.length} orders · {customers.length} customers
-        </p>
-      </div>
+    <div className="flex h-screen bg-gray-50">
+      <Sidebar />
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total Revenue" value={`₹${(totalRevenue/1000).toFixed(1)}K`} sub="Current orders" subColor="var(--accent)" />
-        <StatCard label="Total Profit" value={`₹${(totalProfit/1000).toFixed(1)}K`} sub="Gross profit" subColor="var(--accent)" />
-        <StatCard label="Avg Margin" value={`${avgMargin.toFixed(1)}%`} sub="Overall performance" subColor="var(--info)" />
-        <StatCard label="Low stock" value={lowStock.length} sub="Needs attention" subColor="var(--warning)" />
-        <StatCard label="Out of stock" value={outOfStock.length} sub="Action required" subColor="var(--danger)" />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 16 }}>Stock by category</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={chartData} barSize={28}>
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--text2)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--text2)" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "0.5px solid var(--border)" }} />
-              <Bar dataKey="stock" radius={[4,4,0,0]}>
-                {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 16 }}>Active workflows</div>
-          {workflows.length === 0
-            ? <p style={{ color: "var(--text3)", fontSize: 13 }}>No workflows yet.</p>
-            : workflows.map(wf => (
-              <div key={wf.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "0.5px solid var(--border)" }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: wf.is_active ? "var(--accent)" : "var(--border2)", flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{wf.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)" }}>{wf.trigger}</div>
-                </div>
+      <div className="flex-1 overflow-auto pt-16 lg:pt-0">
+        <div className="hidden lg:block bg-white border-b border-gray-200 sticky top-0 z-10">
+          <div className="px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+                <p className="text-gray-600 text-sm mt-1">
+                  Welcome back, <span className="font-medium">{user?.name}</span>!
+                </p>
               </div>
-            ))
-          }
-        </div>
-      </div>
-
-      <div style={{ background: "var(--surface)", border: "0.5px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 20 }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 14 }}>Items needing attention</div>
-        {[...outOfStock, ...lowStock].slice(0, 5).map(p => (
-          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "0.5px solid var(--border)" }}>
-            <span style={{ fontWeight: 500, fontSize: 13 }}>{p.name}</span>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "var(--text2)" }}>{p.sku}</span>
-              <span style={{ fontSize: 13, color: p.stock === 0 ? "var(--danger)" : "var(--warning)", fontWeight: 500 }}>{p.stock} units</span>
+              <div className="text-right">
+                <p className="text-gray-600 text-sm">
+                  {new Date().toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })}
+                </p>
+              </div>
             </div>
           </div>
-        ))}
+        </div>
+
+        <div className="px-4 lg:px-8 py-6 lg:py-8 space-y-8">
+          {dashboardError && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
+              {dashboardError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <KPICard
+              title="Revenue Today"
+              value={`₹${todayRevenue.toLocaleString()}`}
+              icon={DollarSign}
+              trend={growthPercentage > 0 ? 'up' : 'down'}
+              trendValue={`${growthPercentage > 0 ? '+' : ''}${growthPercentage}%`}
+              color="green"
+              loading={loading}
+            />
+
+            <KPICard
+              title="Orders Today"
+              value={analytics?.orders_today || 0}
+              icon={ShoppingCart}
+              trend="up"
+              trendValue={`${analytics?.orders_this_week || 0} this week`}
+              color="blue"
+              loading={loading}
+            />
+
+            <KPICard
+              title="Low Stock Products"
+              value={analytics?.low_stock_products || 0}
+              icon={Package}
+              trend={(analytics?.low_stock_products || 0) > 5 ? 'down' : 'up'}
+              trendValue={`${analytics?.out_of_stock || 0} out of stock`}
+              color="red"
+              loading={loading}
+            />
+
+            <KPICard
+              title="Active Automations"
+              value={workflows.length || 0}
+              icon={Zap}
+              color="purple"
+              loading={loading}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <p className="text-sm text-gray-600">Products Added Today</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{todayActivity.products}</p>
+              <p className="text-sm text-gray-500 mt-2">Backed by product creation timestamps in the database.</p>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <p className="text-sm text-gray-600">Customers Added Today</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{todayActivity.customers}</p>
+              <p className="text-sm text-gray-500 mt-2">Backed by customer creation timestamps in the database.</p>
+            </div>
+
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <p className="text-sm text-gray-600">Orders Created Today</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{todayActivity.orders}</p>
+              <p className="text-sm text-gray-500 mt-2">Backed by order timestamps in the database.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <RevenueTrendChart data={revenueChart} />
+            <OrderDistributionChart data={orderDistribution} />
+          </div>
+
+          <div>
+            <ActivityTimelineChart data={activityTimeline} />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <TopProductsChart
+              data={topProducts.slice(0, 5).map((product) => ({
+                name: product[0],
+                revenue: product[2],
+              }))}
+            />
+            <InventoryStatusChart data={inventoryStatus} />
+          </div>
+
+          <div>
+            <CategorySalesChart data={categorySales} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-6">
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Zap className="w-5 h-5 text-blue-600" />
+                  <h2 className="text-lg font-bold text-gray-900">Active Automations</h2>
+                </div>
+                <div className="space-y-3">
+                  {workflows.slice(0, 5).map((workflow) => (
+                    <div key={workflow.workflow_id} className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                      <p className="text-sm font-medium text-blue-900">
+                        {workflow.natural_language_input?.substring(0, 60)}...
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="inline-block px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                          {workflow.trigger_type}
+                        </span>
+                        <span className="text-xs text-blue-600">{workflow.actions_json?.length || 0} actions</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200 p-6">
+              <p className="text-sm text-blue-700 font-medium">Total Customers</p>
+              <p className="text-3xl font-bold text-blue-900 mt-2">{analytics?.total_customers || 0}</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg border border-green-200 p-6">
+              <p className="text-sm text-green-700 font-medium">This Week Revenue</p>
+              <p className="text-3xl font-bold text-green-900 mt-2">
+                ₹{(analytics?.revenue_this_week || 0).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200 p-6">
+              <p className="text-sm text-purple-700 font-medium">Pending Orders</p>
+              <p className="text-3xl font-bold text-purple-900 mt-2">{analytics?.pending_orders || 0}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
